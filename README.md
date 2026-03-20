@@ -50,6 +50,23 @@ ascii-chart draw -t architecture "画一个微服务架构"
 
 # 指定模型
 ascii-chart draw -m "gpt-4o" "画一个订单处理的流程图"
+
+# 使用 Anthropic
+ascii-chart draw -p anthropic "画一个流程图"
+```
+
+### Python API
+
+```python
+from ascii_chart import ChartManager, AnthropicClient
+
+# 使用 Anthropic
+client = AnthropicClient(
+    api_key="your-api-key",
+    model="claude-3-5-sonnet-20241022",
+)
+manager = ChartManager(client)
+result = manager.draw("画一个用户登录的流程图")
 ```
 
 ## 图表类型
@@ -116,14 +133,69 @@ ascii-chart draw -m "gpt-4o" "画一个订单处理的流程图"
 | `ASCII_CHART_API_KEY` | API 密钥 | - |
 | `ASCII_CHART_BASE_URL` | API 地址 | `https://api.openai.com/v1` |
 | `ASCII_CHART_MODEL` | 模型名称 | `gpt-4` |
-| `ASCII_CHART_TEMPERATURE` | 温度参数 | `0.7` |
-| `ASCII_CHART_MAX_TOKENS` | 最大 token 数 | `2048` |
+| `ASCII_CHART_PROVIDER` | Provider | `openai`（可选 `anthropic`） |
+
+## Provider 配置
+
+### OpenAI (默认)
+
+```bash
+export ASCII_CHART_API_KEY="sk-xxx"
+export ASCII_CHART_MODEL="gpt-4"  # 可选，默认 gpt-4
+ascii-chart draw "画一个流程图"
+```
+
+### Anthropic
+
+```bash
+export ASCII_CHART_API_KEY="sk-ant-xxx"
+export ASCII_CHART_PROVIDER="anthropic"
+export ASCII_CHART_MODEL="claude-3-5-sonnet-20241022"  # 可选
+ascii-chart draw "画一个流程图"
+```
+
+### 自动检测
+
+CLI 会根据 `ASCII_CHART_BASE_URL` 自动推断 Provider：
+- URL 包含 `anthropic` → 使用 Anthropic
+- 其他 URL → 使用 OpenAI
+
+```bash
+# 自动使用 Anthropic（URL 中包含 anthropic）
+export ASCII_CHART_BASE_URL="https://api.anthropic.com/v1"
+export ASCII_CHART_API_KEY="sk-ant-xxx"
+ascii-chart draw "画一个流程图"
+```
+
+## CLI 帮助
+
+```bash
+ascii-chart draw --help
+```
+
+```
+usage: cli.py draw [-h] [-t {flowchart,architecture,sequence,table,state}]
+                    [-p {openai,anthropic}] [-m MODEL] [--base-url BASE_URL]
+                    [-k API_KEY]
+                    description
+
+positional arguments:
+  description            图表描述
+
+options:
+  -h, --help            显示帮助
+  -t, --type            图表类型
+  -p, --provider        LLM Provider (默认: openai，或根据 BASE_URL 自动推断)
+  -m, --model           模型名称
+  --base-url            API 地址
+  -k, --api-key         API 密钥
+```
 
 ## 开发
 
 ```bash
 # 克隆仓库
-git clone https://github.com/yourname/ascii-chart.git
+git clone https://github.com/liu-kaining/ascii-chart.git
 cd ascii-chart
 
 # 安装开发依赖
