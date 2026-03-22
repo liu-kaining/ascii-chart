@@ -16,77 +16,73 @@ from ascii_chart.renderers.ascii import ASCIRenderer
 from ascii_chart.config import LLMConfig
 
 
-# 系统提示词
-SYSTEM_PROMPT = """你是一个专业的 ASCII 图表生成器。用户会输入图表描述，你需要生成对应的结构化 JSON 数据。
+# 系统提示词 - 针对不同图表类型优化
+SYSTEM_PROMPT = """你是一个 ASCII 图表生成器。请根据用户描述生成结构化 JSON 数据。
 
-支持的图表类型：
-- flowchart: 流程图，用于描述流程和决策路径
-- architecture: 架构图，用于描述系统分层和组件关系
-- sequence: 序列图，用于描述对象间的交互顺序
-- table: 表格，用于以行列形式展示数据
-- state: 状态图，用于描述状态转换
+【重要规则】
+1. 只输出纯 JSON，不要任何 Markdown 代码块包裹
+2. JSON 必须能被 Python json.loads() 直接解析
+3. 不要输出任何解释性文字
 
-输出格式要求：
-1. 严格按照 JSON 格式输出，不要包含其他内容
-2. 确保 JSON 可以被 Python json.loads() 解析
-3. 所有文本使用中文或英文都可以
+【图表类型与格式】
 
-图表格式说明：
-
-【流程图 flowchart】
+1. 流程图 (flowchart) - 用于业务流程、决策路径
+```json
 {
   "type": "flowchart",
   "nodes": [
-    {"id": "node1", "label": "节点标签", "node_type": "start/end/process/decision"}
+    {"id": "n1", "label": "显示文本", "node_type": "start/end/process/decision"}
   ],
   "edges": [
-    {"from_node": "node1", "to_node": "node2", "label": "可选标签"}
+    {"from_node": "n1", "to_node": "n2", "label": "条件(可选)"}
   ]
 }
+```
+node_type 说明：start=开始, end=结束, process=处理步骤, decision=判断分支
 
-【架构图 architecture】
+2. 架构图 (architecture) - 用于系统分层、组件关系
+```json
 {
   "type": "architecture",
   "layers": [
-    {
-      "name": "层名称",
-      "components": [
-        {"id": "comp1", "name": "组件名称"}
-      ]
-    }
+    {"name": "层名", "components": [{"id": "c1", "name": "组件名"}]}
   ]
 }
+```
 
-【序列图 sequence】
+3. 序列图 (sequence) - 用于对象交互、时序流程
+```json
 {
   "type": "sequence",
-  "participants": [
-    {"id": "p1", "name": "参与者名称"}
-  ],
-  "interactions": [
-    {"from_participant": "p1", "to_participant": "p2", "message": "消息内容", "arrow": "→"}
-  ]
+  "participants": [{"id": "p1", "name": "参与者名"}],
+  "interactions": [{"from_participant": "p1", "to_participant": "p2", "message": "消息内容"}]
 }
+```
 
-【表格 table】
+4. 表格 (table) - 用于展示数据
+```json
 {
   "type": "table",
   "headers": ["列1", "列2"],
-  "rows": [
-    ["值1", "值2"]
-  ]
+  "rows": [["值1", "值2"]]
 }
+```
 
-【状态图 state】
+5. 状态图 (state) - 用于状态机、状态转换
+```json
 {
   "type": "state",
-  "nodes": [
-    {"id": "s1", "label": "状态名称", "node_type": "start/end"}
-  ],
-  "edges": [
-    {"from_node": "s1", "to_node": "s2", "label": "转换条件"}
-  ]
+  "nodes": [{"id": "s1", "label": "状态名", "node_type": "start/end"}],
+  "edges": [{"from_node": "s1", "to_node": "s2", "label": "转换条件"}]
 }
+```
+
+【节点ID命名规则】
+- 英文简短ID，如 n1, n2, n3 或 start, process, end
+- 确保 edges 中的 from_node/to_node 引用存在
+- ID 保持唯一
+
+请直接输出 JSON。
 """
 
 
@@ -146,13 +142,13 @@ class ChartManager:
         """构建提示词"""
         if chart_type and chart_type in SUPPORTED_CHART_TYPES:
             type_desc = CHART_TYPE_DESCRIPTIONS.get(chart_type, "")
-            return f"请生成一个 {chart_type} ({type_desc})：\n\n{description}\n\n请直接输出 JSON，不要包含其他内容。"
+            return f"请生成一个 {chart_type}（{type_desc}）：\n\n{description}\n\n直接输出 JSON。"
         else:
-            return f"""请根据以下描述生成图表。首先判断最合适的图表类型，然后生成对应的 JSON。
+            return f"""请根据以下描述生成图表。判断最合适的图表类型，然后生成对应的 JSON。
 
 描述：{description}
 
-请先说明图表类型，然后直接输出 JSON，不要包含其他内容。"""
+直接输出 JSON，不要有任何其他文字。"""
 
     def _parse_response(self, response: str) -> ChartData:
         """
@@ -207,13 +203,13 @@ class ChartManager:
 
         # 尝试直接解析
         try:
-            json.loads(text)
-            return text
+            json.loads(text.strip())
+            return text.strip()
         except json.JSONDecodeError:
             pass
 
-        # 尝试从代码块中提取
-        # ```json ... ```
+        # 清理 Markdown 代码块
+        # ```json ... ``` 或 ``` ... ```
         pattern = r"```(?:json)?\s*([\s\S]*?)\s*```"
         matches = re.findall(pattern, text)
         for match in matches:
@@ -223,10 +219,9 @@ class ChartManager:
             except json.JSONDecodeError:
                 continue
 
-        # 尝试找 { ... }
+        # 尝试找 { ... } 块
         brace_start = text.find("{")
         if brace_start != -1:
-            # 找到最后一个 }
             brace_end = text.rfind("}")
             if brace_end != -1:
                 candidate = text[brace_start:brace_end + 1]

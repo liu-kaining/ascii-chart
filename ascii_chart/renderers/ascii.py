@@ -51,79 +51,131 @@ class ASCIRenderer:
             raise ValueError(f"Unsupported chart type: {type(chart_data)}")
 
     def _render_flowchart(self, data: FlowchartData) -> str:
-        """渲染流程图"""
-        lines = []
+        """渲染流程图 - 简化版，垂直布局"""
+        if not data.nodes:
+            return ""
 
-        # 按拓扑排序排列节点
-        ordered = self._topological_sort_flowchart(data)
+        # 构建节点映射
         node_map = {n.id: n for n in data.nodes}
 
-        # 计算每个节点的出度和入度
-        for i, node_id in enumerate(ordered):
-            node = node_map[node_id]
-            outgoing = data.get_outgoing_edges(node_id)
+        # 找起始节点（入度为0的节点）
+        in_degree = {n.id: 0 for n in data.nodes}
+        for edge in data.edges:
+            in_degree[edge.to_node] += 1
+        start_nodes = [n for n in data.nodes if in_degree[n.id] == 0]
+        start = start_nodes[0] if start_nodes else data.nodes[0]
 
-            # 渲染节点
-            if node.node_type == "start" or node.node_type == "end":
-                # 圆角矩形
-                lines.append(f"┌───────┐")
-                lines.append(f"│ {node.label:^5} │")
-                lines.append(f"└───────┘")
-            elif node.node_type == "decision":
-                # 菱形
-                label = node.label
-                lines.append(f"   ╱ {label} ╲")
-                lines.append(f"  ╱       ╲")
-                lines.append(f" ╱         ╲")
-            elif node.node_type == "comment":
-                # 注释/说明
-                lines.append(f"│ {node.label}")
-            else:
-                # 普通矩形
-                label = node.label
-                lines.append(f"┌────┐")
-                lines.append(f"│{label}│")
-                lines.append(f"└────┘")
+        # 计算最大宽度
+        max_width = max(len(n.label) + 4 for n in data.nodes)
+        max_width = max(max_width, 30)
 
-            # 渲染连接线
-            if outgoing:
-                if len(outgoing) == 1:
-                    lines.append(" │")
-                    lines.append(" ▼")
-                elif len(outgoing) == 2:
-                    # 分支
-                    lines.append(" │")
-                    lines.append(" ├──○")
-                    lines.append(" │")
-                    lines.append(" └──○")
-                    # 继续渲染两个分支
-                    for edge in outgoing:
-                        branch_label = edge.label or ""
-                        branch_node = node_map.get(edge.to_node)
-                        if branch_node:
-                            lines.append(f" │  (分支: {branch_label})")
-                            if branch_node.node_type in ("start", "end"):
-                                lines.append(f" │  ┌───────┐")
-                                lines.append(f" │  │ {branch_node.label:^5} │")
-                                lines.append(f" │  └───────┘")
-                            else:
-                                lines.append(f" │  ┌────┐")
-                                lines.append(f" │  │{branch_node.label}│")
-                                lines.append(f" │  └────┘")
-                else:
-                    lines.append(" │")
-                    lines.append(" ▼")
+        lines = []
+
+        # 从起始节点开始深度优先遍历
+        visited = set()
+        self._render_flowchart_node(start, node_map, data, visited, lines, max_width)
 
         return "\n".join(lines)
 
+    def _render_flowchart_node(self, node, node_map, data, visited, lines, width):
+        """递归渲染流程图节点"""
+        if node.id in visited:
+            return
+        visited.add(node.id)
+
+        # 渲染节点
+        if node.node_type == "start" or node.node_type == "end":
+            lines.append(self._render_rounded_box(node.label, width))
+        elif node.node_type == "decision":
+            lines.append(self._render_diamond(node.label, width))
+        else:
+            lines.append(self._render_rectangle(node.label, width))
+
+        # 获取出边
+        outgoing = data.get_outgoing_edges(node.id)
+
+        if outgoing:
+            if len(outgoing) == 1:
+                # 单向出边，渲染向下箭头
+                lines.append(self._render_arrow_down(width))
+                self._render_flowchart_node(node_map[outgoing[0].to_node], node_map, data, visited, lines, width)
+            elif len(outgoing) == 2:
+                # 分支 - 先渲染一个向下箭头，然后渲染两个分支
+                lines.append(self._render_arrow_down(width))
+                # 渲染分支
+                lines.append(self._render_branch(width))
+                # 分支1
+                edge1 = outgoing[0]
+                label1 = f"({edge1.label}) " if edge1.label else ""
+                lines.append(self._render_branch_node_line(label1 + node_map[edge1.to_node].label, width, 'left'))
+                lines.append(self._render_branch_connector(width, 'left'))
+                visited.add(edge1.to_node)  # 标记已访问
+                # 分支2
+                edge2 = outgoing[1]
+                label2 = f"({edge2.label}) " if edge2.label else ""
+                lines.append(self._render_branch_node_line(label2 + node_map[edge2.to_node].label, width, 'right'))
+                lines.append(self._render_branch_connector(width, 'right'))
+                visited.add(edge2.to_node)
+        else:
+            # 末端节点，渲染底部
+            pass
+
+    def _render_rectangle(self, text: str, width: int) -> str:
+        """渲染矩形框"""
+        text = text[:width - 4]
+        return f"┌{'─' * (width - 2)}┐\n│ {text:^{width - 4}} │\n└{'─' * (width - 2)}┘"
+
+    def _render_rounded_box(self, text: str, width: int) -> str:
+        """渲染圆角框"""
+        text = text[:width - 4]
+        return f"╭{'─' * (width - 2)}╮\n│ {text:^{width - 4}} │\n╰{'─' * (width - 2)}╯"
+
+    def _render_diamond(self, text: str, width: int) -> str:
+        """渲染菱形（决策节点）"""
+        inner_width = width - 4
+        lines = []
+        # 上半部分
+        for i in range(inner_width // 2):
+            padding = i + 1
+            lines.append(' ' * padding + '╱' + ' ' * (inner_width - padding * 2) + '╲')
+        # 中间行
+        lines.append(f" {text:^{inner_width}} ")
+        # 下半部分
+        for i in range(inner_width // 2 - 1, -1, -1):
+            padding = i + 1
+            lines.append(' ' * padding + '╲' + ' ' * (inner_width - padding * 2) + '╱')
+        return "\n".join(lines)
+
+    def _render_arrow_down(self, width: int) -> str:
+        """渲染向下箭头"""
+        return '│' + ' ' * (width // 2) + '▼' + ' ' * (width - width // 2 - 1) + '│'
+
+    def _render_branch(self, width: int) -> str:
+        """渲染分支起点"""
+        inner = width - 2
+        half = inner // 2
+        return '├' + '─' * half + '┴' + '─' * (inner - half) + '┤'
+
+    def _render_branch_node_line(self, text: str, width: int, side: str) -> str:
+        """渲染分支节点行"""
+        if side == 'left':
+            return '│' + text + ' ' * (width - len(text) - 1)
+        else:
+            return ' ' * (width // 2 + 1) + text + '│'
+
+    def _render_branch_connector(self, width: int, side: str) -> str:
+        """渲染分支连接线"""
+        if side == 'left':
+            return '│' + ' ' * (width - 1)
+        else:
+            return ' ' * (width // 2 + 1) + '│'
+
     def _topological_sort_flowchart(self, data: FlowchartData) -> list[str]:
         """拓扑排序流程图节点"""
-        # 简单的拓扑排序
         in_degree = {n.id: 0 for n in data.nodes}
         for edge in data.edges:
             in_degree[edge.to_node] = in_degree.get(edge.to_node, 0) + 1
 
-        # 找到入度为0的节点（通常应该是start）
         result = []
         queue = [n.id for n in data.nodes if in_degree[n.id] == 0]
 
@@ -136,72 +188,104 @@ class ASCIRenderer:
                     if in_degree[edge.to_node] == 0:
                         queue.append(edge.to_node)
 
-        # 如果没有排序成功（可能有环），按原始顺序返回
         if len(result) != len(data.nodes):
             return [n.id for n in data.nodes]
 
         return result
 
     def _render_architecture(self, data: ArchitectureData) -> str:
-        """渲染架构图"""
+        """渲染分层架构图 - 整体矩形框，内部用虚线分隔层"""
+        if not data.layers:
+            return ""
+
+        # 计算每层需要的宽度
+        # 宽度 = max(所有组件名的最大长度, 20)
+        max_component_len = 0
+        for layer in data.layers:
+            for comp in layer.components:
+                max_component_len = max(max_component_len, len(comp.name))
+
+        # 每层显示宽度
+        layer_width = max(max_component_len + 4, 24)
+
+        # 总宽度 = 层宽 + 左右边框(2)
+        total_width = layer_width + 2
+
         lines = []
-        separator = "─" * (self.width - 2)
 
-        for i, layer in enumerate(data.layers):
-            # 渲染层名
-            lines.append("┌─ " + layer.name + " " + "─" * (self.width - len(layer.name) - 4) + "┐")
+        # 渲染顶层边框
+        lines.append("┌" + "─" * (total_width - 2) + "┐")
 
-            # 渲染该层的组件
-            components_str = " │ ".join(c.name for c in layer.components)
-            lines.append(f"│ {components_str:<{self.width - 4}} │")
+        # 渲染每一层
+        for layer_idx, layer in enumerate(data.layers):
+            # 层名行
+            layer_name = f"│ {layer.name} │"
+            lines.append(layer_name)
 
-            # 渲染层分隔符
-            if i < len(data.layers) - 1:
-                lines.append(f"├─ {separator} ┤")
-            else:
-                lines.append(f"└─ {separator} ┘")
+            # 层内分隔线（用虚线表示）
+            if layer.components:
+                for comp in layer.components:
+                    comp_line = f"│ {comp.name:<{layer_width - 2}} │"
+                    lines.append(comp_line)
+
+            # 层之间加分隔线（最后一层除外）
+            if layer_idx < len(data.layers) - 1:
+                lines.append("├" + "─" * (total_width - 2) + "┤")
+
+        # 渲染底层边框
+        lines.append("└" + "─" * (total_width - 2) + "┘")
 
         return "\n".join(lines)
 
     def _render_sequence(self, data: SequenceData) -> str:
         """渲染序列图"""
+        if not data.participants:
+            return ""
+
         lines = []
+        col_width = 20
+
+        # 计算总宽度
+        total_width = 4 + len(data.participants) * col_width
 
         # 渲染参与者头部
-        participant_names = [p.name for p in data.participants]
-        header = "│ " + " │ ".join(f"{name:^15}" for name in participant_names) + " │"
+        header = "┌" + "─" * (total_width - 2) + "┐"
         lines.append(header)
 
-        # 渲染分隔线
-        divider = "├─" + "─┼─".join("─" * 17 for _ in data.participants) + "─┤"
-        lines.append(divider)
+        names_line = "│"
+        for p in data.participants:
+            names_line += f" {p.name:^{col_width - 2}} │"
+        lines.append(names_line)
 
         # 渲染生命线
-        lifeline = "│ " + " │ ".join("▼" * 15 for _ in data.participants) + " │"
+        lifeline = "├"
+        for i in range(len(data.participants)):
+            lifeline += "┬" + "─" * (col_width - 2) if i < len(data.participants) - 1 else "─" * (col_width - 2) + "┤"
         lines.append(lifeline)
 
         # 渲染交互
         for interaction in data.interactions:
-            # 找到 from 和 to 的索引
-            from_idx = next(i for i, p in enumerate(data.participants) if p.id == interaction.from_participant)
-            to_idx = next(i for i, p in enumerate(data.participants) if p.id == interaction.to_participant)
+            from_idx = next((i for i, p in enumerate(data.participants) if p.id == interaction.from_participant), 0)
+            to_idx = next((i for i, p in enumerate(data.participants) if p.id == interaction.to_participant), 0)
 
             # 构建消息行
-            spaces = ["          " for _ in data.participants]
-            if from_idx < to_idx:
-                # 向右箭头
-                spaces[from_idx] = f"──{interaction.arrow}─"
-                spaces[to_idx] = f"──→         "
-            else:
-                # 向左箭头（返回）
-                spaces[from_idx] = f"←──"
-                spaces[to_idx] = f"──{interaction.arrow}  "
+            msg_line = "│"
+            for i in range(len(data.participants)):
+                if i == from_idx:
+                    if from_idx < to_idx:
+                        msg_line += f"──{interaction.arrow}─▶│"
+                    else:
+                        msg_line += f"◀──{interaction.arrow}─│"
+                elif i == to_idx:
+                    msg_line += f" {interaction.message:<{col_width - 4}} │"
+                else:
+                    msg_line += " " * col_width + "│"
+            lines.append(msg_line)
+            lines.append(lifeline)
 
-            spaces[from_idx] = spaces[from_idx][:8] + interaction.message[:8]
-
-            msg = "│ " + "│".join(spaces) + " │"
-            lines.append(msg)
-            lines.append(divider)
+        # 渲染底部
+        bottom = "└" + "─" * (total_width - 2) + "┘"
+        lines.append(bottom)
 
         return "\n".join(lines)
 
@@ -248,20 +332,29 @@ class ASCIRenderer:
 
     def _render_state(self, data: StateData) -> str:
         """渲染状态图"""
-        lines = []
+        if not data.nodes:
+            return ""
 
-        # 简单的状态渲染
-        for i, node in enumerate(data.nodes):
-            if i == 0:
-                lines.append(f"◎─→┌ {node.label} ┐")
-            elif node.node_type == "end":
-                lines.append(f"  └─→ ◎ {node.label}")
-            else:
-                lines.append(f"  └─→┌ {node.label} ┐")
+        lines = []
+        node_map = {n.id: n for n in data.nodes}
+
+        for node in data.nodes:
+            outgoing = data.get_outgoing_edges(node.id)
+
+            # 渲染状态
+            lines.append(f"╭─────────╮")
+            lines.append(f"│ {node.label:^7} │")
+            lines.append(f"╰─────────╯")
 
             # 渲染转换
-            for edge in data.get_outgoing_edges(node.id):
-                label = edge.label or ""
-                lines.append(f"     │  {label}")
+            for edge in outgoing:
+                target = node_map.get(edge.to_node)
+                if target:
+                    label = edge.label or ""
+                    lines.append(f"    │")
+                    lines.append(f"    ↓ {label}")
+                    lines.append(f"╭─────────╮")
+                    lines.append(f"│ {target.label:^7} │")
+                    lines.append(f"╰─────────╯")
 
         return "\n".join(lines)
